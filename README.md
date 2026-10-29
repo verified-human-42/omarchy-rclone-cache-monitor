@@ -1,5 +1,7 @@
 # rclone Cache Monitor
 
+**Is rclone reading from your disk or from the cloud? Now you can see it, live in your bar.**
+
 An Omarchy bar widget for the rclone mounts you already have. It shows what each one is doing right now:
 
 - **Served from local cache vs. to/from the cloud.** Is rclone answering from its VFS cache on your disk, or moving data over the network?
