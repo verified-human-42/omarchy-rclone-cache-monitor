@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# One JSON snapshot of every rclone FUSE mount on this machine, for the rclone Cache Monitor bar widget.
+#
+#   rclone-cache-stats [--readers]
+#
+# Mounts come from findmnt (fstype fuse.rclone). Each is matched to the rclone process serving it:
+# an `rclone mount` whose command line names the mount point, or an `rclone rcd` that lists it in
+# mount/listmounts. If that process has the remote control API on (--rc, or rcd), VFS cache and
+# upload-queue stats are read from it with curl. Counters are cumulative: the widget diffs two
+# snapshots to get rates. --readers also counts open files per app under each mount point.
+#
+# Needs: bash, jq, curl, findmnt (util-linux). Nothing is written anywhere.
+set -uo pipefail
+
+READERS=false
+[[ "${1:-}" == --readers ]] && READERS=true
+MAX_QUEUE=20     # queued upload names reported per mount
+MAX_NAME=300     # characters per reported name
+RC_TIMEOUT=2     # seconds per API call
+
+# --- rclone processes: pid -> NUL-separated argv, subcommand and remote-control address ---------
+declare -A ARGS SUB RC AUTH
+for pid in $(pgrep -x rclone); do
+  [[ -r /proc/$pid/cmdline ]] || continue
+  mapfile -d '' argv < "/proc/$pid/cmdline"
+  sub="" rc_on=false addr="" auth=false
+  for ((i = 1; i < ${#argv[@]}; i++)); do
+    a=${argv[i]}
+    case "$a" in
+      mount|nfsmount|rcd) [[ -z "$sub" ]] && sub=$a ;;
+      --rc) rc_on=true ;;
+      --rc=true) rc_on=true ;;
+      --rc-addr=*) addr=${a#--rc-addr=} ;;
+      --rc-addr) addr=${argv[i + 1]:-} ;;
+      --rc-user|--rc-user=*|--rc-pass|--rc-pass=*|--rc-htpasswd|--rc-htpasswd=*) auth=true ;;
+    esac
+  done
+  [[ "$sub" == rcd ]] && rc_on=true
+  [[ -n "$sub" ]] || continue
+  ARGS[$pid]=$(printf '%s\n' "${argv[@]}")
+  SUB[$pid]=$sub
+  $rc_on && RC[$pid]=${addr:-localhost:5572}
+  AUTH[$pid]=$auth
+done
+
+# rc <pid> <method> [json-body]: call a process's remote control API; prints JSON or nothing.
+rc() {
+  local addr=${RC[$1]:-} body=${3:-'{}'} url
+  [[ -n "$addr" ]] || return 1
+  local args=(-fsS --max-time "$RC_TIMEOUT" -X POST -H 'Content-Type: application/json' -d "$body")
+  if [[ "$addr" == unix://* ]]; then
+    args+=(--unix-socket "${addr#unix://}"); url="http://localhost/$2"
+  else
+    addr=${addr#http://}; addr=${addr%/}
+    [[ "$addr" == :* ]] && addr="localhost$addr"
+    url="http://$addr/$2"
+  fi
+  curl "${args[@]}" "$url" 2>/dev/null
+}
+
+# --- mount points ------------------------------------------------------------------------------
+# findmnt -r escapes spaces and other bytes as \xNN; printf %b undoes it.
+mounts=()
+sources=()
+while read -r target source; do
+  mounts+=("$(printf '%b' "$target")")
+  sources+=("$(printf '%b' "$source")")
+done < <(findmnt -rn -t fuse.rclone -o TARGET,SOURCE 2>/dev/null)
+
+# rcd processes: which mount points they serve, from mount/listmounts.
+declare -A RCD_OWNER RCD_FS
+for pid in "${!SUB[@]}"; do
+  [[ "${SUB[$pid]}" == rcd ]] || continue
+  while IFS=$'\t' read -r fs mp; do
+    [[ -n "$mp" ]] && { RCD_OWNER[$mp]=$pid; RCD_FS[$mp]=$fs; }
+  done < <(rc "$pid" mount/listmounts | jq -r '.mountPoints // [] | .[] | [.Fs, .MountPoint] | @tsv' 2>/dev/null)
+done
+
+owner_of() {  # owner_of <mount point>: pid of the rclone process serving it, if any
+  local mp=$1 pid
+  [[ -n "${RCD_OWNER[$mp]:-}" ]] && { echo "${RCD_OWNER[$mp]}"; return; }
+  for pid in "${!SUB[@]}"; do
+    [[ "${SUB[$pid]}" == rcd ]] && continue
+    while IFS= read -r a; do
+      [[ "$a" == "$mp" || "$a" == "$mp/" ]] && { echo "$pid"; return; }
+      [[ "$a" == /* || "$a" == ~* ]] || continue
+      [[ "$(realpath -m -- "${a/#\~/$HOME}" 2>/dev/null)" == "$mp" ]] && { echo "$pid"; return; }
+    done <<< "${ARGS[$pid]}"
+  done
+}
+
+# --- open files per mount point (one /proc walk for all mounts) ---------------------------------
+readers_json='{}'
+if $READERS && ((${#mounts[@]})); then
+  readers_json=$(
+    for p in /proc/[0-9]*; do
+      comm=$(cat "$p/comm" 2>/dev/null) || continue
+      for fd in "$p"/fd/*; do
+        t=$(readlink "$fd" 2>/dev/null) || continue
+        [[ "$t" == /* ]] && printf '%s\t%s\n' "$comm" "$t"
+      done
+    done | jq -R -s -c --args '
+      ($ARGS.positional) as $mps
+      | [split("\n")[] | select(length > 0) | split("\t") | {app: .[0], path: (.[1:] | join("\t"))}] as $fds
+      | reduce $mps[] as $mp ({};
+          .[$mp] = ([$fds[] | select(.path == $mp or (.path | startswith($mp + "/")))]
+                    | group_by(.app) | map({app: .[0].app[0:64], files: length})
+                    | sort_by(-.files) | .[:5]))' "${mounts[@]}"
+  )
+fi
+
+# --- one record per mount -------------------------------------------------------------------------
+records=()
+for i in "${!mounts[@]}"; do
+  mp=${mounts[i]} src=${sources[i]}
+  pid=$(owner_of "$mp")
+  rec=$(jq -n -c --arg mp "$mp" --arg src "$src" '{mountpoint: $mp, source: $src}')
+  if [[ -z "$pid" ]]; then
+    records+=("$(jq -c '. + {pid: null, stats: "no-process"}' <<< "$rec")")
+    continue
+  fi
+  read_bytes=$(awk '/^rchar/{print $2}' "/proc/$pid/io" 2>/dev/null)
+  cpu_ticks=$(awk '{print $14 + $15}' "/proc/$pid/stat" 2>/dev/null)
+  rec=$(jq -c --argjson pid "$pid" --arg kind "${SUB[$pid]}" \
+    --argjson rb "${read_bytes:-0}" --argjson ct "${cpu_ticks:-0}" \
+    '. + {pid: $pid, kind: $kind, read_bytes: $rb, cpu_ticks: $ct}' <<< "$rec")
+
+  if [[ -z "${RC[$pid]:-}" ]]; then
+    records+=("$(jq -c '. + {stats: "off"}' <<< "$rec")")
+    continue
+  fi
+  body='{}'
+  [[ -n "${RCD_FS[$mp]:-}" ]] && body=$(jq -n -c --arg fs "${RCD_FS[$mp]}" '{fs: $fs}')
+  vfs=$(rc "$pid" vfs/stats "$body")
+  core=$(rc "$pid" core/stats)
+  if [[ -z "$vfs" || -z "$core" ]]; then
+    state=unreachable; [[ "${AUTH[$pid]}" == true ]] && state=auth
+    records+=("$(jq -c --arg s "$state" '. + {stats: $s}' <<< "$rec")")
+    continue
+  fi
+  queue=$(rc "$pid" vfs/queue "$body"); [[ -n "$queue" ]] || queue='{}'
+  records+=("$(jq -c --argjson v "$vfs" --argjson c "$core" --argjson q "$queue" \
+    --argjson mq "$MAX_QUEUE" --argjson mn "$MAX_NAME" '. + {
+      stats: "ok",
+      net_bytes: ($c.bytes // 0), errors: ($c.errors // 0),
+      cache_mode: ($v.opt.CacheMode // null),
+      uploads_queued: ($v.diskCache.uploadsQueued // 0),
+      uploads_in_progress: ($v.diskCache.uploadsInProgress // 0),
+      cache_bytes: ($v.diskCache.bytesUsed // 0), cache_max_bytes: ($v.opt.CacheMaxSize // -1),
+      cache_files: ($v.diskCache.files // 0), cache_errored: ($v.diskCache.erroredFiles // 0),
+      out_of_space: ($v.diskCache.outOfSpace // false),
+      queue: [($q.queue // [])[:$mq][] | (.name // "" | tostring)[:$mn]]
+    }' <<< "$rec")")
+done
+
+printf '%s\n' "${records[@]}" | jq -s -c \
+  --arg ts "$(date +%s.%N)" --argjson hz "$(getconf CLK_TCK)" --argjson readers "$readers_json" \
+  '{ts: ($ts | tonumber), hz: $hz,
+    mounts: [.[] | select(. != null) | . + {readers: ($readers[.mountpoint] // [])}]}'

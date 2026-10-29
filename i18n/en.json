@@ -1,0 +1,44 @@
+{
+  "title": "rclone mounts",
+  "noMounts": "No rclone mounts",
+  "noMountsHint": "Mount a remote with rclone mount (or rclone rcd) and it shows up here.",
+  "collectorFailed": "Couldn't read mount stats (needs bash, jq, curl and findmnt)",
+  "fromCache": "Served from local cache",
+  "fromNetwork": "To/from the cloud",
+  "reads": "Reads (cache + network)",
+  "uploads": "Uploads",
+  "uploadsValue": "%1 queued, %2 in progress",
+  "cache": "Cache",
+  "cacheValue": "%1 of %2 GB",
+  "cacheValueNoLimit": "%1 GB (no limit)",
+  "cacheOff": "VFS cache is off (--vfs-cache-mode off)",
+  "cacheFiles": {
+    "one": "%1 file",
+    "other": "%1 files"
+  },
+  "cacheErrored": {
+    "one": "%1 errored",
+    "other": "%1 errored"
+  },
+  "outOfSpace": "Cache is out of disk space",
+  "cpu": "rclone CPU",
+  "cpuValue": "%1% of one core",
+  "sharedProcess": "Speeds and CPU are for the whole rclone rcd process",
+  "rate": "%1 MB/s",
+  "statsOff": "Stats API is off for this mount",
+  "statsOffHint": "Add --rc --rc-no-auth --rc-addr unix://$XDG_RUNTIME_DIR/rclone.sock to its rclone command to see cache and upload stats.",
+  "statsAuth": "Stats API needs a password, so cache stats aren't shown",
+  "statsUnreachable": "Stats API isn't answering",
+  "noProcess": "No rclone process is serving this mount",
+  "noProcessHint": "It may be a stale mount. Unmount it with: fusermount3 -u <mount point>",
+  "waiting": "WAITING TO UPLOAD",
+  "readers": "APPS USING THIS MOUNT",
+  "readerFiles": {
+    "one": "%1 open file",
+    "other": "%1 open files"
+  },
+  "openFolder": "Open folder",
+  "tooltip": "rclone: cache %1 MB/s, network %2 MB/s, %3 uploading",
+  "tooltipNone": "rclone: no mounts",
+  "tooltipProblem": "rclone: a mount needs attention"
+}

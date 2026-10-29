@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.verified-human-42.rclone-cache-monitor",
+  "name": "rclone Cache Monitor",
+  "version": "0.1.0",
+  "author": "verified-human-42",
+  "license": "MIT",
+  "homepage": "https://github.com/verified-human-42/omarchy-rclone-cache-monitor",
+  "description": "See what your rclone mounts are doing: reads served from the local VFS cache vs traffic to the cloud, the upload queue, and how full the cache is",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "rclone Cache Monitor",
+    "description": "Read-only monitor for existing rclone mounts: cache vs network reads, upload queue, cache fill, and which apps use each mount.",
+    "category": "System",
+    "aliases": ["rclone", "vfs", "cache", "mount", "google-drive", "onedrive", "dropbox"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "pollSec": 3,
+      "showRate": true
+    },
+    "schema": [
+      {
+        "key": "pollSec",
+        "type": "integer",
+        "label": "Update every (seconds)",
+        "min": 1,
+        "max": 30,
+        "step": 1,
+        "defaultValue": 3
+      },
+      {
+        "key": "showRate",
+        "type": "boolean",
+        "label": "Show network speed in the bar",
+        "defaultValue": true,
+        "description": "While rclone is downloading or uploading, show the speed next to the icon."
+      }
+    ]
+  }
+}
