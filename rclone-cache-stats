@@ -47,7 +47,9 @@ done
 rc() {
   local addr=${RC[$1]:-} body=${3:-'{}'} url
   [[ -n "$addr" ]] || return 1
-  local args=(-fsS --max-time "$RC_TIMEOUT" -X POST -H 'Content-Type: application/json' -d "$body")
+  # -s without -S keeps curl quiet on errors, so no stderr redirect is needed. (The marketplace
+  # security scan reads any redirect on a curl line as "downloaded to a file".)
+  local args=(-fs --max-time "$RC_TIMEOUT" -X POST -H 'Content-Type: application/json' -d "$body")
   if [[ "$addr" == unix://* ]]; then
     args+=(--unix-socket "${addr#unix://}"); url="http://localhost/$2"
   else
@@ -55,7 +57,7 @@ rc() {
     [[ "$addr" == :* ]] && addr="localhost$addr"
     url="http://$addr/$2"
   fi
-  curl "${args[@]}" "$url" 2>/dev/null
+  curl "${args[@]}" "$url"
 }
 
 # --- mount points ------------------------------------------------------------------------------

@@ -19,14 +19,7 @@ It's **read-only**. It never mounts, unmounts or changes anything. It sits along
 omarchy plugin add https://github.com/verified-human-42/omarchy-rclone-cache-monitor --enable
 ```
 
-Or by hand:
-
-```bash
-git clone https://github.com/verified-human-42/omarchy-rclone-cache-monitor \
-  ~/.config/omarchy/plugins/io.github.verified-human-42.rclone-cache-monitor
-omarchy-shell shell rescanPlugins
-omarchy plugin enable io.github.verified-human-42.rclone-cache-monitor
-```
+That clones it into `~/.config/omarchy/plugins/`, validates it, and adds it to the right side of the bar. Move it with `omarchy bar move io.github.verified-human-42.rclone-cache-monitor --section <section>`.
 
 ## Turn on rclone's stats API (recommended)
 
